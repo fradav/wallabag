@@ -5,6 +5,7 @@ namespace Tests\Wallabag\CoreBundle\Controller;
 use Tests\Wallabag\CoreBundle\WallabagCoreTestCase;
 use Wallabag\CoreBundle\Entity\Config;
 use Wallabag\CoreBundle\Entity\Entry;
+use Wallabag\CoreBundle\Entity\SiteCredential;
 
 class EntryControllerTest extends WallabagCoreTestCase
 {
@@ -1320,5 +1321,38 @@ class EntryControllerTest extends WallabagCoreTestCase
         $this->assertInstanceOf('Wallabag\CoreBundle\Entity\Entry', $content);
         $this->assertEquals($url, $content->getUrl());
         $this->assertEquals($expectedLanguage, $content->getLanguage());
+    }
+
+    public function testRestrictedArticle()
+    {
+        $url = 'https://www.mediapart.fr/journal/france/250117/edf-fait-payer-au-prix-fort-la-centrale-de-fessenheim';
+        $this->logInAs('admin');
+        $client = $this->getClient();
+        $em = $client->getContainer()->get('doctrine.orm.entity_manager');
+
+        // enable restricted access
+        $client->getContainer()->get('craue_config')->set('restricted_access', 1);
+
+        // create a new site_credential for mediapart
+        $user = $client->getContainer()->get('security.token_storage')->getToken()->getUser();
+        $credential = new SiteCredential($user);
+        $credential->setHost('mediapart.fr');
+        $credential->setUsername('foo');
+        $credential->setPassword('bar');
+
+        $em->persist($credential);
+        $em->flush();
+
+        $content = $em
+            ->getRepository('WallabagCoreBundle:Entry')
+            ->findByUrlAndUserId($url.'?onglet=full', $this->getLoggedInUserId());
+
+        $this->assertInstanceOf('Wallabag\CoreBundle\Entity\Entry', $content);
+        $this->assertSame('EDF fait payer au prix fort la centrale de Fessenheim', $content->getTitle());
+
+        $client->getContainer()->get('craue_config')->set('restricted_access', 0);
+
+        $em->createQuery('DELETE FROM Wallabag\CoreBundle\Entity\SiteCredential s WHERE s.id = '.$credential->getId())->execute();
+        $em->createQuery('DELETE FROM Wallabag\CoreBundle\Entity\Entry e WHERE e.id = '.$content->getId())->execute();
     }
 }
